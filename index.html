@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="styles.css">
+<meta name="theme-color" content="#111827">
+<title>Fantasy Draft Board</title>
+<script src="players.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+
+<header>
+    <h2><span class="header-emoji">🏈</span> Fantasy Draft Board</h2>
+    <div class="header-right">
+        <div class="tracker">
+            <span>Roster:</span>
+            <span>QB: <span id="count-qb">0</span></span>
+            <span>RB: <span id="count-rb">0</span></span>
+            <span>WR: <span id="count-wr">0</span></span>
+            <span>TE: <span id="count-te">0</span></span>
+        </div>
+        <label class="theme-switch" title="Toggle Theme">
+            <input type="checkbox" id="theme-switch-checkbox" onchange="toggleTheme()" aria-label="Toggle dark/light theme">
+            <span class="slider">
+                <span class="icon sun">☀️</span>
+                <span class="icon moon">🌙</span>
+            </span>
+        </label>
+    </div>
+</header>
+
+<div class="snake-tracker-container">
+    <div class="snake-setting-group">
+        <div class="snake-setting">
+            <span>🏟️ League Size:</span>
+            <select id="snake-teams-select" class="snake-select" onchange="updateLeagueTeamsCount(this.value)">
+                <option value="8">8 Teams</option>
+                <option value="10" selected>10 Teams</option>
+                <option value="12">12 Teams</option>
+                <option value="14">14 Teams</option>
+                <option value="16">16 Teams</option>
+            </select>
+        </div>
+        <div class="snake-setting">
+            <span style="color: var(--accent-blue);">🐍 My Draft Slot:</span>
+            <select id="snake-slot-select" class="snake-select" onchange="updateDraftPosition(this.value)">
+            </select>
+        </div>
+        <div class="snake-setting">
+            <span>⚡ Scoring Format:</span>
+            <select id="scoring-format-select" class="snake-select" onchange="updateScoringFormat(this.value)">
+                <option value="PPR_4" selected>Full PPR (4pt Pass TD)</option>
+                <option value="PPR_6">Full PPR (6pt Pass TD)</option>
+                <option value="HALF_4">Half PPR (4pt Pass TD)</option>
+                <option value="HALF_6">Half PPR (6pt Pass TD)</option>
+                <option value="STD_4">No PPR / Standard (4pt Pass TD)</option>
+                <option value="STD_6">No PPR / Standard (6pt Pass TD)</option>
+            </select>
+        </div>
+        <div class="snake-setting">
+            <span>🏈 Sleeper Sync:</span>
+            <input type="text" id="sleeper-draft-id" class="snake-select" style="width: 110px;" placeholder="Draft ID..." onchange="saveSleeperDraftId(this.value)" onkeydown="if(event.key==='Enter') { saveSleeperDraftId(this.value); if(!isSleeperSyncActive) toggleSleeperSync(); }">
+            <input type="text" id="sleeper-username" class="snake-select" style="width: 110px;" placeholder="Username..." value="ViniAvila" onchange="saveSleeperUsername(this.value)">
+            <button class="btn-timer-ctrl" id="sleeper-sync-btn" onclick="toggleSleeperSync()">Connect</button>
+            <span id="sleeper-sync-status" style="font-size: 11px; font-weight: 800; color: var(--text-muted);">🔴 Off</span>
+        </div>
+    </div>
+    
+    <div class="draft-timer-box">
+        <span class="snake-label">Clock:</span>
+        <span id="timer-display" class="timer-display">01:00</span>
+        <button class="btn-timer-ctrl" onclick="toggleTimer()" id="timer-play-btn" aria-label="Play/pause draft clock">▶</button>
+        <button class="btn-timer-ctrl" onclick="resetTimer()" aria-label="Reset draft clock">↺</button>
+    </div>
+
+    <div class="snake-stat-card">
+        <span class="snake-label">On Clock:</span>
+        <span id="snake-current-pick" class="snake-val">Pick 1.01 (#1) — Team 1</span>
+    </div>
+    <div id="snake-my-next-card" class="snake-stat-card highlight">
+        <span class="snake-label">My Next Turn:</span>
+        <span id="snake-my-next" class="snake-val">Pick 1.01 (#1) — 0 picks away</span>
+    </div>
+</div>
+
+<div id="bap-banner-container" class="bap-container" style="display: none;"></div>
+
+<div class="controls-container">
+    <div class="search-box">
+        <input type="text" id="search-input" class="search-input" placeholder="🔍 Real-Time Search (Press '/' to focus)..." oninput="handleSearch(this.value)">
+        <div class="tag-filter-group">
+            <button class="btn-tag-filter active" id="tf-all" onclick="filterTag('ALL', this)">All</button>
+            <button class="btn-tag-filter" id="tf-target" onclick="filterTag('TARGET', this)">⭐ Targets</button>
+            <button class="btn-tag-filter" id="tf-sleeper" onclick="filterTag('SLEEPER', this)">🚀 Sleepers</button>
+            <button class="btn-tag-filter" id="tf-avoid" onclick="filterTag('AVOID', this)">⚠️ Avoids</button>
+        </div>
+        <label style="font-size:12px; font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; margin-left:8px;">
+            <input type="checkbox" id="hide-k-dst-checkbox" checked onchange="toggleHideKDst(this.checked)"> Hide K/DST
+        </label>
+    </div>
+    <div class="controls-actions">
+        <button class="btn-backup" id="density-toggle-btn" onclick="toggleDensityMode()" title="Toggle Density View Mode">📐 Compact</button>
+        <button class="btn-backup" onclick="openAddPlayerModal()" title="Add custom rookie/sleeper">+ Player</button>
+        <button class="btn-undo" id="undo-pick-btn" onclick="undoLastPick()" disabled title="Undo Pick (Ctrl+Z)">↩️ Undo</button>
+        <button class="btn-undo btn-redo" id="redo-pick-btn" onclick="redoLastUndo()" disabled title="Redo Pick (Ctrl+Shift+Z)">↪️ Redo</button>
+        <button class="btn-backup" onclick="exportDraftState()" title="Export JSON">📤 Backup</button>
+        <button class="btn-backup" onclick="document.getElementById('import-file-input').click()" title="Import JSON">📥 Import</button>
+        <button class="btn-backup" onclick="exportCSV()" title="Export CSV Summary">📊 CSV</button>
+        <input type="file" id="import-file-input" style="display: none;" accept=".json" onchange="importDraftState(event)">
+        <button class="btn-backup" onclick="openPickLogModal()" title="Pick Log">📜 Log</button>
+        <button class="btn-reset-draft" onclick="resetDraft()">🔄 Reset</button>
+    </div>
+</div>
+
+<div class="tabs">
+    <button class="tab active" onclick="filterPos('ALL', this)">Big Board</button>
+    <button class="tab" onclick="filterPos('RB', this)">RB</button>
+    <button class="tab" onclick="filterPos('WR', this)">WR</button>
+    <button class="tab" onclick="filterPos('TE', this)">TE</button>
+    <button class="tab" onclick="filterPos('QB', this)">QB</button>
+    <button class="tab" onclick="filterPos('K', this)">K</button>
+    <button class="tab" onclick="filterPos('DST', this)">DST</button>
+    <button class="tab" onclick="filterPos('ROSTER', this)">📋 My Roster</button>
+    <button class="tab" onclick="filterPos('LEAGUE', this)">🏟️ League Board</button>
+</div>
+
+<div class="container">
+    <table id="draft-board">
+        <thead>
+            <tr>
+                <th>Mine</th>
+                <th>Gone</th>
+                <th>Tag</th>
+                <th class="sortable" onclick="handleSort('rank')" title="Click to sort by Rank or Rank Movement Trend">
+                    Rank <span class="sort-icon" id="sort-icon-rank">↕</span>
+                </th>
+                <th class="sortable" onclick="handleSort('ceiling')" title="Click to sort by Upside Ceiling">
+                    Ceiling <span class="sort-icon" id="sort-icon-ceiling">↕</span>
+                </th>
+                <th class="left sortable" onclick="handleSort('name')" title="Click to sort alphabetically by Player Name">
+                    Player <span class="sort-icon" id="sort-icon-name">↕</span>
+                </th>
+                <th class="sortable" onclick="handleSort('team')" title="Click to sort by Team">
+                    Team <span class="sort-icon" id="sort-icon-team">↕</span>
+                </th>
+                <th class="sortable" onclick="handleSort('bye')" title="Click to sort by Bye Week">
+                    Bye <span class="sort-icon" id="sort-icon-bye">↕</span>
+                </th>
+                <th class="sortable" onclick="handleSort('pos')" title="Click to sort by Position">
+                    Pos <span class="sort-icon" id="sort-icon-pos">↕</span>
+                </th>
+                <th class="sortable" onclick="handleSort('tier')" title="Click to sort by Tier">
+                    Tier <span class="sort-icon" id="sort-icon-tier">↕</span>
+                </th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="board-body">
+        </tbody>
+    </table>
+
+    <div id="roster-view-container" style="display: none;"></div>
+    <div id="league-view-container" style="display: none;"></div>
+
+    <!-- Player VS Comparison Modal -->
+    <div id="compare-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeCompareModal()">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3>🆚 Side-by-Side Player Comparison</h3>
+                <button class="modal-close-btn" onclick="closeCompareModal()" aria-label="Close comparison modal">✕</button>
+            </div>
+            <div id="compare-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Rename Team Modal -->
+    <div id="rename-team-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeRenameTeamModal()">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3>✏️ Rename Team</h3>
+                <button class="modal-close-btn" onclick="closeRenameTeamModal()" aria-label="Close rename team modal">✕</button>
+            </div>
+            <div class="form-group">
+                <label>Team Name</label>
+                <input type="text" id="rename-team-input" class="form-control" placeholder="Enter Team Name" onkeydown="if(event.key==='Enter') saveRenamedTeam()">
+            </div>
+            <button class="btn-quick-draft-clock" onclick="saveRenamedTeam()">💾 Save Team Name</button>
+        </div>
+    </div>
+
+    <!-- Team Roster & Positional Needs Inspector Modal -->
+    <div id="team-roster-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeTeamRosterModal()">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header">
+                <h3 id="team-roster-modal-title">🏟️ Team Roster & Needs</h3>
+                <button class="modal-close-btn" onclick="closeTeamRosterModal()" aria-label="Close team roster modal">✕</button>
+            </div>
+            <div id="team-roster-modal-body"></div>
+        </div>
+    </div>
+
+    <div id="player-stats-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closePlayerStatsModal()">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h3 id="stats-modal-player-name">📊 Player Game Log Stats</h3>
+                <button class="modal-close-btn" onclick="closePlayerStatsModal()" aria-label="Close player stats modal">✕</button>
+            </div>
+            <div id="stats-modal-body"></div>
+        </div>
+    </div>
+
+    <div id="pick-log-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closePickLogModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📜 Draft Pick History Log</h3>
+                <button class="modal-close-btn" onclick="closePickLogModal()" aria-label="Close pick log modal">✕</button>
+            </div>
+            <div id="history-log-container" class="history-log-list"></div>
+        </div>
+    </div>
+
+    <div id="team-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeTeamModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Select Drafting Team</h3>
+                <button class="modal-close-btn" onclick="closeTeamModal()" aria-label="Close team selection modal">✕</button>
+            </div>
+            <div class="modal-player-banner">
+                <span id="modal-player-name">Player Name</span>
+                <span id="modal-player-info" style="color: var(--text-secondary); font-size: 13px;">Team • POS</span>
+            </div>
+            <button id="modal-quick-draft-btn" class="btn-quick-draft-clock"></button>
+            <div id="modal-teams-grid" class="modal-teams-grid"></div>
+        </div>
+    </div>
+
+    <div id="edit-player-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeEditPlayerModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✏️ Edit Player</h3>
+                <button class="modal-close-btn" onclick="closeEditPlayerModal()" aria-label="Close edit player modal">✕</button>
+            </div>
+            <div class="form-group">
+                <label>Player Name</label>
+                <input type="text" id="edit-p-name" class="form-control" placeholder="Player Name">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Team (e.g. KC, SF)</label>
+                    <input type="text" id="edit-p-team" class="form-control" placeholder="Team">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Position</label>
+                    <select id="edit-p-pos" class="form-control">
+                        <option value="RB">RB</option>
+                        <option value="WR">WR</option>
+                        <option value="TE">TE</option>
+                        <option value="QB">QB</option>
+                        <option value="K">K</option>
+                        <option value="DST">DST</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Overall Rank</label>
+                    <input type="number" id="edit-p-rank" class="form-control" value="1">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Ceiling Rank (Upside)</label>
+                    <input type="number" id="edit-p-ceiling" class="form-control" placeholder="e.g. 10">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Tier</label>
+                    <select id="edit-p-tier" class="form-control">
+                        <option value="S">Tier S</option><option value="A">Tier A</option>
+                        <option value="B">Tier B</option><option value="C">Tier C</option>
+                        <option value="D">Tier D</option><option value="E">Tier E</option>
+                        <option value="F">Tier F</option><option value="G">Tier G</option>
+                        <option value="H">Tier H</option><option value="I">Tier I</option>
+                        <option value="J">Tier J</option><option value="K">Tier K</option>
+                        <option value="L">Tier L</option><option value="M">Tier M</option>
+                        <option value="N">Tier N</option><option value="O">Tier O</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn-quick-draft-clock" onclick="saveEditedPlayer()">💾 Save Changes</button>
+        </div>
+    </div>
+
+    <div id="confirm-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeConfirmModal()" role="alertdialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3 id="confirm-modal-title">Confirm</h3>
+                <button class="modal-close-btn" onclick="closeConfirmModal()" aria-label="Cancel and close">✕</button>
+            </div>
+            <p id="confirm-modal-message" style="color: var(--text-secondary); font-size: 14px; line-height: 1.5; margin: 0 0 18px;"></p>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-backup" style="flex:1;" onclick="closeConfirmModal()" id="confirm-modal-cancel-btn">Cancel</button>
+                <button class="btn-quick-draft-clock" style="flex:1; margin-bottom:0;" id="confirm-modal-confirm-btn"></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="add-player-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeAddPlayerModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>➕ Add Custom Player</h3>
+                <button class="modal-close-btn" onclick="closeAddPlayerModal()" aria-label="Close add player modal">✕</button>
+            </div>
+            <div class="form-group">
+                <label>Player Name</label>
+                <input type="text" id="add-p-name" class="form-control" placeholder="e.g. Marvin Harrison Jr.">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Team (e.g. KC)</label>
+                    <input type="text" id="add-p-team" class="form-control" placeholder="KC">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Position</label>
+                    <select id="add-p-pos" class="form-control">
+                        <option value="RB">RB</option>
+                        <option value="WR">WR</option>
+                        <option value="TE">TE</option>
+                        <option value="QB">QB</option>
+                        <option value="K">K</option>
+                        <option value="DST">DST</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Overall Rank</label>
+                    <input type="number" id="add-p-rank" class="form-control" value="100">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Ceiling Rank (Upside)</label>
+                    <input type="number" id="add-p-ceiling" class="form-control" placeholder="e.g. 15">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Tier</label>
+                    <select id="add-p-tier" class="form-control">
+                        <option value="S">Tier S</option><option value="A">Tier A</option>
+                        <option value="B">Tier B</option><option value="C">Tier C</option>
+                        <option value="D">Tier D</option><option value="E">Tier E</option>
+                        <option value="F">Tier F</option><option value="G">Tier G</option>
+                        <option value="H" selected>Tier H</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn-quick-draft-clock" onclick="saveCustomPlayer()">Save Player</button>
+        </div>
+    </div>
+</div>
+<div id="roster-toast" class="toast-msg"></div>
+
+</body>
+</html>
