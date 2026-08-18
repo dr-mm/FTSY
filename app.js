@@ -722,6 +722,8 @@ let scoringFormat = 'PPR_4';
 
 function updateScoringFormat(val) {
     scoringFormat = val;
+    applyScoringFormatRanks(val);
+    updatePositionalRanks();
     saveDraftState();
     let label = "Full PPR (4pt Pass TD)";
     if (val === 'PPR_6') label = "Full PPR (6pt Pass TD)";
@@ -804,7 +806,7 @@ function updateLeagueTeamsCount(countVal) {
     populateSlotSelectOptions();
     saveDraftState();
     updateSnakeTracker();
-    if (currentFilter === 'LEAGUE') renderLeagueView();
+    if (currentFilter === 'LEAGUE' && typeof renderLeagueSyncView === 'function') renderLeagueSyncView();
     showToast(`🏟️ League size set to ${newCount} Teams`);
 }
 
@@ -824,6 +826,43 @@ function populateSlotSelectOptions() {
 
     const scoringSelectElem = document.getElementById('scoring-format-select');
     if (scoringSelectElem) scoringSelectElem.value = scoringFormat;
+}
+
+// --- Integration point for league-sync.js: pushes REAL Sleeper team names
+// onto the local `teams` array, keyed by draft slot (1..N) — the exact same
+// slot numbering sleeper-worker.js already uses for pick.draft_slot, so
+// team.id lines up directly with no translation needed. Kept as a single
+// narrow entry point so League Sync never has to reach into draft-board
+// internals (stateTracker/playerDraftMap) directly.
+function applyLeagueSyncTeamNames(nameBySlot) {
+    if (!nameBySlot) return;
+    const slots = Object.keys(nameBySlot).map(Number).filter(n => !isNaN(n));
+    if (!slots.length) return;
+
+    // Grow (never shrink) the local team list so every real team has a slot
+    // to receive its name — shrinking here could wipe out drafted-player
+    // assignments on higher slots, so that stays a manual/explicit action.
+    const neededCount = Math.max(...slots);
+    if (neededCount > teams.length) {
+        for (let i = teams.length + 1; i <= neededCount; i++) teams.push({ id: i, name: `Team ${i}` });
+    }
+
+    let changed = false;
+    slots.forEach(slot => {
+        const team = teams.find(t => t.id === slot);
+        const newName = sanitizePlainText(nameBySlot[slot]);
+        if (team && newName && team.name !== newName) {
+            team.name = newName;
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        saveDraftState();
+        populateSlotSelectOptions();
+        updateSnakeTracker();
+        if (currentFilter === 'LEAGUE' && typeof renderLeagueSyncView === 'function') renderLeagueSyncView();
+    }
 }
 
 function syncTeamNamesWithDraftSlot() {
@@ -863,7 +902,7 @@ function updateDraftPosition(slotVal, fromAutoSync = false) {
     syncTeamNamesWithDraftSlot();
     reevaluateAllRosters();
     updateSnakeTracker();
-    if (currentFilter === 'LEAGUE') renderLeagueView();
+    if (currentFilter === 'LEAGUE' && typeof renderLeagueSyncView === 'function') renderLeagueSyncView();
     else renderCurrentActiveView();
 }
 
@@ -1021,6 +1060,70 @@ function getPlayer(id) {
     return playersMap.get(id) || playersMap.get(Number(id));
 }
 
+// --- PER-FORMAT RANK APPLICATION ---
+// Each player carries a `ranks{}` object (PPR_4/PPR_6/HALF_4/HALF_6/STD_4/STD_6),
+// kept fresh by scripts/update-rankings.mjs. This copies the rank for the given
+// format onto the single p.rank/p.prevRank fields the rest of the app already
+// reads/sorts/renders by. Players with no ranks{} (custom/manually-added) are
+// left untouched, and so are players the user has hand-edited a rank for
+// (p.manualRank) — an explicit edit should survive a format switch or a sync.
+function applyScoringFormatRanks(format) {
+    let changed = 0;
+    players.forEach(p => {
+        if (p.manualRank) return;
+        if (!p.ranks || p.ranks[format] === undefined) return;
+        const newRank = p.ranks[format];
+        const newPrev = (p.prevRanks && p.prevRanks[format] !== undefined) ? p.prevRanks[format] : newRank;
+        p.rank = newRank;
+        p.prevRank = newPrev;
+        changed++;
+    });
+    return changed;
+}
+
+// --- DAILY RANKINGS SYNC ---
+// players.js ships a `rankingsUpdatedAt` timestamp plus each player's `ranks{}`.
+// scripts/update-rankings.mjs refreshes both daily via GitHub Actions. Because a
+// user's whole board gets saved into localStorage, a newer players.js alone would
+// never reach someone who already has a saved board on this device — this merges
+// the fresh per-format ranks into the saved board (matched by player id) *before*
+// loadDraftState() parses it, without touching picks, tags, teams, or anything
+// else. The old ranks become prevRanks, so the existing ▲/▼ trend badges become,
+// for free, "who moved in the consensus since yesterday" indicators.
+function syncPlayersWithLatestRankings() {
+    try {
+        if (typeof rankingsUpdatedAt === 'undefined') return; // players.js not yet migrated
+        const saved = localStorage.getItem('god_tier_draft_saved_state');
+        if (!saved) return; // nothing saved — defaultPlayers already has the latest ranks baked in
+
+        let parsed;
+        try { parsed = JSON.parse(saved); } catch (e) { return; } // corrupted saves are handled/reported by loadDraftState()
+
+        if (!parsed.players || !Array.isArray(parsed.players)) return;
+        if (parsed.rankingsUpdatedAt === rankingsUpdatedAt) return; // already up to date
+
+        const freshById = new Map(activeDefaultPlayers.map(p => [p.id, p]));
+        let mergedCount = 0;
+
+        parsed.players.forEach(p => {
+            const fresh = freshById.get(p.id);
+            if (!fresh || !fresh.ranks) return; // custom/added player, or one dropped from the latest board
+            p.prevRanks = p.ranks ? Object.assign({}, p.ranks) : Object.assign({}, fresh.ranks);
+            p.ranks = Object.assign({}, fresh.ranks);
+            mergedCount++;
+        });
+
+        parsed.rankingsUpdatedAt = rankingsUpdatedAt;
+        localStorage.setItem('god_tier_draft_saved_state', JSON.stringify(parsed));
+
+        if (mergedCount > 0) {
+            console.log(`✅ Rankings synced: merged updated ranks into ${mergedCount} saved players (${rankingsUpdatedAt})`);
+        }
+    } catch (e) {
+        console.error('Rankings sync failed:', e);
+    }
+}
+
 function updatePositionalRanks() {
     players.sort((a, b) => a.rank - b.rank);
     
@@ -1040,7 +1143,7 @@ function updatePositionalRanks() {
 let saveFailureWarned = false;
 function saveDraftState() {
     try {
-        const draftState = { players, stateTracker, rosterAssignments, myRoster, teams, playerDraftMap, playerTags, pickHistory, myDraftSlot, customRosterSlots, hideKDst, scoringFormat };
+        const draftState = { players, stateTracker, rosterAssignments, myRoster, teams, playerDraftMap, playerTags, pickHistory, myDraftSlot, customRosterSlots, hideKDst, scoringFormat, rankingsUpdatedAt: (typeof rankingsUpdatedAt !== 'undefined' ? rankingsUpdatedAt : null) };
         localStorage.setItem('god_tier_draft_saved_state', JSON.stringify(draftState));
     } catch (e) {
         console.error('Failed to save draft state:', e);
@@ -1052,6 +1155,7 @@ function saveDraftState() {
 }
 
 function loadDraftState() {
+    syncPlayersWithLatestRankings();
     try {
         const saved = localStorage.getItem('god_tier_draft_saved_state');
         if (saved) {
@@ -1095,6 +1199,7 @@ function loadDraftState() {
         if (checkbox) checkbox.checked = hideKDst;
     }
 
+    applyScoringFormatRanks(scoringFormat);
     updatePositionalRanks();
     updateTracker();
     updateUndoButton();
@@ -1123,7 +1228,10 @@ function resetRankTrends() {
         message: 'This will clear the ▲/▼ arrows for every player (starting fresh from now, no prior history). Picks, tags, and teams are not affected.',
         confirmLabel: 'Reset Trends',
         onConfirm: () => {
-            players.forEach(p => { p.prevRank = p.rank; });
+            players.forEach(p => {
+                p.prevRank = p.rank;
+                if (p.ranks) p.prevRanks = Object.assign({}, p.ranks);
+            });
             saveDraftState();
             renderBoard();
             showToast('✅ Rank trend arrows reset!');
@@ -1146,7 +1254,7 @@ function exportCSV() {
 }
 
 function exportDraftState() {
-    const jsonStr = JSON.stringify({ players, stateTracker, rosterAssignments, myRoster, teams, playerDraftMap, playerTags, pickHistory, myDraftSlot, customRosterSlots, scoringFormat });
+    const jsonStr = JSON.stringify({ players, stateTracker, rosterAssignments, myRoster, teams, playerDraftMap, playerTags, pickHistory, myDraftSlot, customRosterSlots, scoringFormat, rankingsUpdatedAt: (typeof rankingsUpdatedAt !== 'undefined' ? rankingsUpdatedAt : null) });
     const blob = new Blob([jsonStr], { type: "application/json" });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -1577,8 +1685,11 @@ function saveEditedPlayer() {
 
     if (!name) return flagInvalidField(document.getElementById('edit-p-name'), "Player name is required");
 
-    if (newRankVal !== p.rank && (p.prevRank === undefined || p.prevRank === null)) {
-        p.prevRank = p.rank;
+    if (newRankVal !== p.rank) {
+        if (p.prevRank === undefined || p.prevRank === null) p.prevRank = p.rank;
+        // Explicit manual edit — a format switch or a daily rankings sync should
+        // no longer overwrite this player's rank; see applyScoringFormatRanks().
+        p.manualRank = true;
     }
 
     p.name = name;
@@ -1753,7 +1864,7 @@ function saveRenamedTeam() {
         populateSlotSelectOptions();
         saveDraftState();
         updateSnakeTracker();
-        if (currentFilter === 'LEAGUE') renderLeagueView();
+        if (currentFilter === 'LEAGUE' && typeof renderLeagueSyncView === 'function') renderLeagueSyncView();
         else renderBoard();
         showToast(`✏️ Renamed to ${team.name}`);
         closeRenameTeamModal();
@@ -2030,41 +2141,6 @@ function selectDraftTeam(teamId) {
     updateTracker();
     updateSnakeTracker();
     renderCurrentActiveView();
-}
-
-function renderLeagueView() {
-    const container = document.getElementById('league-view-container');
-    if (!container) return;
-    container.classList.remove('tab-view-content');
-    void container.offsetWidth;
-    container.classList.add('tab-view-content');
-
-    container.innerHTML = `<div class="league-teams-grid">` + teams.map(team => {
-        const teamPlayers = Object.keys(playerDraftMap).filter(pId => Number(playerDraftMap[pId]) === Number(team.id)).map(pId => getPlayer(pId)).filter(Boolean);
-        teamPlayers.sort((a,b) => a.rank - b.rank);
-        return `
-            <div class="team-card" onclick="openTeamRosterModal(${team.id})" style="cursor: pointer;" title="Click to inspect team roster & position needs">
-                <div class="team-card-header">
-                    <div class="team-title-box">
-                        <span class="team-title">${team.name}</span>
-                        <button class="btn-edit-team" onclick="event.stopPropagation(); renameTeam(${team.id})" title="Rename Team">✏️</button>
-                    </div>
-                    <span class="team-count-badge">${teamPlayers.length} Drafted</span>
-                </div>
-                <div class="team-roster-list">${teamPlayers.length === 0 ? '<div class="empty-text">No players drafted yet</div>' : teamPlayers.map(p => {
-                    const av = getPlayerHeadshot(p);
-                    return `
-                        <div class="team-player-row">
-                            <span class="team-player-name player-name-link" style="display:flex; align-items:center; gap:8px;" onclick="event.stopPropagation(); openPlayerStatsModal(${p.id})">
-                                <img src="${av}" class="player-avatar-img" style="width:28px; height:28px;" alt="${p.name}">
-                                ${p.name} <span style="color:var(--text-muted); font-size:12px;">(${p.team || ''})</span>
-                            </span>
-                            <span class="badge ${p.posClass}">${p.displayPos || p.pos}</span>
-                        </div>
-                    `;
-                }).join('')}</div>
-            </div>`;
-    }).join('') + `</div>`;
 }
 
 const defaultRosterSlots = [
@@ -2419,7 +2495,7 @@ function handleDrop(event, targetSlotId) {
 
 function renderCurrentActiveView() {
     if (currentFilter === 'ROSTER') renderRosterView();
-    else if (currentFilter === 'LEAGUE') renderLeagueView();
+    else if (currentFilter === 'LEAGUE') { if (typeof renderLeagueSyncView === 'function') renderLeagueSyncView(); }
     else renderBoard();
 }
 
@@ -2700,9 +2776,12 @@ function filterPos(pos, btnElement) {
     currentFilter = pos;
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     btnElement.classList.add('active');
-    document.getElementById('draft-board').style.display = (pos === 'ROSTER' || pos === 'LEAGUE') ? 'none' : 'table';
-    document.getElementById('roster-view-container').style.display = (pos === 'ROSTER') ? 'block' : 'none';
-    document.getElementById('league-view-container').style.display = (pos === 'LEAGUE') ? 'block' : 'none';
+    const boardEl = document.getElementById('draft-board');
+    const rosterEl = document.getElementById('roster-view-container');
+    const leagueEl = document.getElementById('league-sync-container');
+    if (boardEl) boardEl.style.display = (pos === 'ROSTER' || pos === 'LEAGUE') ? 'none' : 'table';
+    if (rosterEl) rosterEl.style.display = (pos === 'ROSTER') ? 'block' : 'none';
+    if (leagueEl) leagueEl.style.display = (pos === 'LEAGUE') ? 'block' : 'none';
     renderCurrentActiveView();
 }
 

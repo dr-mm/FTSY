@@ -1,4 +1,4 @@
-const CACHE_NAME = 'god-tier-draft-v7';
+const CACHE_NAME = 'god-tier-draft-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,8 @@ const ASSETS = [
   './app.js',
   './players.js',
   './sleeper-worker.js',
+  './league-sync.js',
+  './sleeper-league-worker.js',
   './manifest.json'
 ];
 

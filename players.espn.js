@@ -55,7 +55,7 @@ const defaultPlayers = [
     {"id": 53, "rank": 53, "name": "Luther Burden", "team": "CHI", "bye": 7, "pos": "WR", "posClass": "pos-wr", "tier": "F", "espnId": "4685278"},
     {"id": 54, "rank": 54, "name": "TreVeyon Henderson", "team": "NE", "bye": 14, "pos": "RB", "posClass": "pos-rb", "tier": "G", "espnId": "4432710"},
     {"id": 55, "rank": 55, "name": "Mike Evans", "team": "SF", "bye": 9, "pos": "WR", "posClass": "pos-wr", "tier": "G", "espnId": "16737"},
-    {"id": 56, "rank": 56, "name": "Lamar Jackson", "team": "BAL", "bye": 14, "pos": "QB", "posClass": "pos-qb", "tier": "G", "espnId": "4034849"},
+    {"id": 56, "rank": 56, "name": "Lamar Jackson", "team": "BAL", "bye": 14, "pos": "QB", "posClass": "pos-qb", "tier": "G", "espnId": "3916387"},
     {"id": 57, "rank": 57, "name": "Carnell Tate", "team": "TEN", "bye": 5, "pos": "WR", "posClass": "pos-wr", "tier": "G", "espnId": "4871023"},
     {"id": 58, "rank": 58, "name": "Jadarian Price", "team": "SEA", "bye": 10, "pos": "RB", "posClass": "pos-rb", "tier": "G", "espnId": "4685512"},
     {"id": 59, "rank": 59, "name": "Rome Odunze", "team": "CHI", "bye": 7, "pos": "WR", "posClass": "pos-wr", "tier": "G", "espnId": "4431299"},

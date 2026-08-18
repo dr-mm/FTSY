@@ -9,6 +9,7 @@
 <title>Fantasy Draft Board</title>
 <script src="players.js"></script>
 <script src="app.js" defer></script>
+<script src="league-sync.js" defer></script> 
 </head>
 <body>
 
@@ -67,6 +68,13 @@
             <button class="btn-timer-ctrl" id="sleeper-sync-btn" onclick="toggleSleeperSync()">Connect</button>
             <span id="sleeper-sync-status" style="font-size: 11px; font-weight: 800; color: var(--text-muted);">🔴 Off</span>
         </div>
+        <div class="snake-setting">
+            <span>🏆 League Sync:</span>
+            <input type="text" id="sleeper-league-id" class="snake-select" style="width: 130px;" placeholder="League ID..." onchange="saveLeagueSyncId(this.value)" onkeydown="if(event.key==='Enter') { saveLeagueSyncId(this.value); if(!leagueSyncActive) toggleLeagueSync(); }">
+            <button class="btn-timer-ctrl" id="league-sync-btn" onclick="toggleLeagueSync()">Connect</button>
+            <span id="league-sync-status" style="font-size: 11px; font-weight: 800; color: var(--text-muted);">🔴 Off</span>
+        </div>
+
     </div>
     
     <div class="draft-timer-box">
@@ -111,6 +119,7 @@
         <button class="btn-backup" onclick="exportCSV()" title="Export CSV Summary">📊 CSV</button>
         <input type="file" id="import-file-input" style="display: none;" accept=".json" onchange="importDraftState(event)">
         <button class="btn-backup" onclick="openPickLogModal()" title="Pick Log">📜 Log</button>
+        <button class="btn-backup" onclick="resetRankTrends()" title="Zera as setas ▲▼ de movimento de rank (não afeta picks/times)">↺ Trends</button>
         <button class="btn-reset-draft" onclick="resetDraft()">🔄 Reset</button>
     </div>
 </div>
@@ -163,7 +172,7 @@
     </table>
 
     <div id="roster-view-container" style="display: none;"></div>
-    <div id="league-view-container" style="display: none;"></div>
+    <div id="league-sync-container" style="display: none;"></div>
 
     <!-- Player VS Comparison Modal -->
     <div id="compare-modal-overlay" class="modal-overlay" onclick="if(event.target===this) closeCompareModal()">
